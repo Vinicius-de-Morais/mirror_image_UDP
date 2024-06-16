@@ -4,18 +4,9 @@ use std::{fmt, fs::File, net::UdpSocket};
 pub mod protocol;
 
 
-pub fn handle_request(socket: UdpSocket, client_addr: std::net::SocketAddr, request_packet: &[u8]) -> io::Result<()> {    
-    // Protocolo para lidar com
-    let mut protocol = protocol::Protocol::new();
-    protocol.handle_request(socket, client_addr, request_packet)?;
-
-    println!("File received successfully!");
-    Ok(())
-}
-
-
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Package {
+    pub address: std::net::SocketAddr,
     pub package_type: PackageType,
     pub sequence: u8,
     pub data: Vec<u8>,
@@ -23,56 +14,57 @@ pub struct Package {
 
 impl Package {
 
-    pub fn new_syn() -> Package {
+    pub fn new(address: std::net::SocketAddr) -> Package {
         Package {
+            address,
             package_type: PackageType::SYN,
             sequence: 0,
             data: vec![],
         }
     }
 
-    pub fn new_ack() -> Package {
-        Package {
-            package_type: PackageType::ACK,
-            sequence: 0,
-            data: vec![],
-        }
+    pub fn syn(mut self) -> Package{
+        self.package_type = PackageType::SYN;
+        self
     }
 
-    pub fn new_nak() -> Package {
-        Package {
-            package_type: PackageType::NAK,
-            sequence: 0,
-            data: vec![],
-        }
+    pub fn ack(mut self) -> Package{
+        self.package_type = PackageType::ACK;
+        self
     }
 
-    pub fn new_data(sequence: u8, data: &[u8]) -> Package {
-        Package {
-            package_type: PackageType::PKG,
-            sequence,
-            data: data.to_vec(),
-        }
+    pub fn nak(mut self) -> Package{
+        self.package_type = PackageType::NAK;
+        self
     }
 
-    pub fn from_bytes(bytes: &[u8]) -> Option<Package> {
+    pub fn new_data(mut self, sequence: u8, data: &[u8]) -> Package {
+
+        self.package_type =PackageType::PKG;
+        self.sequence = sequence;
+        self.data = data.to_vec();
+        self
+    }
+
+    pub fn from_bytes(bytes: &[u8], address: std::net::SocketAddr) -> Option<Package> {
         if bytes.len() < 4 {
             return None;
         }
-
+    
         let package_type = match &bytes[0..3] {
             b"SYN" => PackageType::SYN,
             b"ACK" => PackageType::ACK,
             b"NAK" => PackageType::NAK,
             b"PKG" => PackageType::PKG,
             b"END" => PackageType::END,
-            _ => return None,
+            _ => PackageType::END, // Replace `return None;` with a valid package type
         };
-
+    
         let sequence = bytes[3];
         let data = bytes[4..].to_vec();
-
+    
         Some(Package {
+            address,
             package_type,
             sequence,
             data,
@@ -88,7 +80,7 @@ impl Package {
     
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum PackageType {
     SYN,
     ACK,

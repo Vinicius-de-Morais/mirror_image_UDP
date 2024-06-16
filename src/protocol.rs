@@ -1,14 +1,14 @@
-use std::{fs::File, io::{self, Write}, net::{SocketAddr, UdpSocket}, path};
+use std::{fs::File, io::{self, Write}, net::{SocketAddr, UdpSocket}};
 
 use crate::{Package, PackageType};
-use std::net::{Ipv4Addr, SocketAddrV4};
 
-
+#[derive(Debug, PartialEq, Clone)]
 pub struct Protocol {
     pub packages: Vec<Package>,
     pub current_sequence: u8,
     pub current_ack: u8,
     pub current_nak: u8,
+    pub resolved: bool,
 }
 
 
@@ -19,11 +19,12 @@ impl Protocol {
             current_sequence: 0,
             current_ack: 0,
             current_nak: 0,
+            resolved: false,
         }
     }
 
     pub fn handle_request(&mut self, socket: UdpSocket, client_addr: SocketAddr, request_packet: &[u8]) -> io::Result<()> {
-        let request_packet = Package::from_bytes(request_packet).unwrap();
+        let request_packet = Package::from_bytes(request_packet, client_addr).unwrap();
         match request_packet.package_type {
             PackageType::SYN => {
                 self.handle_syn(socket, client_addr);
@@ -49,7 +50,7 @@ impl Protocol {
     pub fn send_ack(&mut self, socket: UdpSocket, client_addr: SocketAddr){
         self.current_ack += 1;
     
-        let response_packet = Package::new_ack();
+        let mut response_packet = Package::new(client_addr).ack();
         let response_packet = response_packet.to_bytes();
         socket.send_to(&response_packet, client_addr);
     }
@@ -57,22 +58,29 @@ impl Protocol {
     pub fn send_nak(&mut self, socket: UdpSocket, client_addr: SocketAddr){
         self.current_nak += 1;
     
-        let response_packet = Package::new_nak();
+        let response_packet = Package::new(client_addr).nak();
         let response_packet = response_packet.to_bytes();
         socket.send_to(&response_packet, client_addr);
     }
     
     pub fn handle_pkg(&mut self, request_packet: Package, socket: UdpSocket, client_addr: SocketAddr){
         if request_packet.sequence == self.current_sequence {
-            self.packages.push(request_packet);
-            self.current_sequence += 1;
+            self.add_package(request_packet);
             self.send_ack(socket, client_addr);  
         } else {
             self.send_nak(socket, client_addr);
         }
     }
     
+    pub fn add_package(&mut self, package: Package){
+        self.packages.push(package);
+        self.current_sequence += 1;
+    }
+
     pub fn handle_end(&mut self, socket: UdpSocket, client_addr: SocketAddr){
+
+        self.resolved = true;
+        
          // Ordena os pacotes por sequência, se necessário
          self.packages.sort_by_key(|p| p.sequence);
 
